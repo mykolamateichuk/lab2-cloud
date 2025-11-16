@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: Sharded KV Store API
+  version: 1.0.0
+
+paths:
+  /tables:
+    post:
+      summary: Register a new table
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                table_name:
+                  type: string
+                partition_key:
+                  type: string
+                sort_key:
+                  type: string
+              required: [table_name, partition_key, sort_key]
+      responses:
+        '201':
+          description: Table created
+
+  /tables/{table_name}/records:
+    post:
+      summary: Create record
+      parameters:
+        - name: table_name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                partition_key:
+                  type: string
+                sort_key:
+                  type: string
+
+                  type: object
+              required: [partition_key, sort_key, data]
+      responses:
+        '201': { description: Created }
+
+    get:
+      summary: Read record
+      parameters:
+        - name: table_name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: partition_key
+          in: query
+          required: true
+          schema: { type: string }
+        - name: sort_key
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Record found
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { description: Not found }
+
+  /tables/{table_name}/records/delete:
+    delete:
+      summary: Delete record
+      parameters:
+        - name: table_name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: partition_key
+          in: query
+          required: true
+          schema: { type: string }
+        - name: sort_key
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted }

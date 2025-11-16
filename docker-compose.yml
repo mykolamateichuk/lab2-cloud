@@ -1,0 +1,21 @@
+version: '3'
+services:
+  coordinator:
+    build: ./coordinator
+    ports:
+      - "8000:8000"
+    environment:
+      - SHARD_URLS=http://shard1:8000,http://shard2:8000
+    depends_on:
+      - shard1
+      - shard2
+
+  shard1:
+    build: ./shard
+    ports:
+      - "8001:8000"
+
+  shard2:
+    build: ./shard
+    ports:
+      - "8002:8000"
