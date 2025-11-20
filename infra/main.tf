@@ -1,5 +1,27 @@
+terraform {
+  required_version = ">= 1.0"
+  backend "s3" {
+    bucket         = "horse-zombie-warden-pixel-state-bucker-23984"
+    key            = "sharded-kv/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "terraform-locks"  # For state locking
+  }
+}
+
 provider "aws" {
   region = var.region
+}
+
+# Generate SSH key pair
+resource "tls_private_key" "deploy" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "deploy" {
+  key_name   = "sharded-kv-key"
+  public_key = tls_private_key.deploy.public_key_openssh
 }
 
 resource "aws_vpc" "main" {
@@ -7,9 +29,9 @@ resource "aws_vpc" "main" {
 }
 
 resource "aws_subnet" "main" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  map_public_ip_on_launch = true # Дозволяє публічний IP для доступу
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.1.0/24"
+  map_public_ip_on_launch = true
 }
 
 resource "aws_internet_gateway" "gw" {
@@ -31,13 +53,11 @@ resource "aws_route_table_association" "a" {
 
 resource "aws_security_group" "allow_all" {
   vpc_id = aws_vpc.main.id
-  name   = "allow_all_traffic"
-  description = "Allows all inbound and outbound traffic"
   ingress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"] # Вхідний трафік (включно з портом 8000)
+    cidr_blocks = ["0.0.0.0/0"]
   }
   egress {
     from_port   = 0
@@ -47,140 +67,92 @@ resource "aws_security_group" "allow_all" {
   }
 }
 
-# Coordinator - will get shard IPs via template interpolation
-# Terraform will automatically create shards first since coordinator references them
+# Coordinator
 resource "aws_instance" "coordinator" {
-  ami           = "ami-00174bba02cf96021"  # Ubuntu 22.04 LTS
+  ami           = "ami-0ecb62995f68bb549"  # Ubuntu 22.04 LTS in your region
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
-
-  user_data = <<-EOF
+  key_name               = aws_key_pair.deploy.key_name
+  user_data = base64encode(<<-EOF
               #!/bin/bash
-              set -e
+              export DEBIAN_FRONTEND=noninteractive
               apt-get update
-              # Встановлюємо Docker та Docker Compose
-              apt-get install -y docker.io docker-compose-plugin
+              apt-get install -y docker.io
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
-
-              # Чекаємо поки Docker повністю запуститься
-              while ! docker info > /dev/null 2>&1; do
-                echo "Waiting for Docker to start..."
-                sleep 2
-              done
-
-              # Записуємо згенерований docker-compose.yml на інстанс
-              cat > /home/ubuntu/docker-compose.yml << EOL
-              ${templatefile("${path.module}/docker-compose.yml.j2", {
-                shard_urls = "http://${aws_instance.shard1.private_ip}:8000,http://${aws_instance.shard2.private_ip}:8000"
-              })}
-              EOL
-
-              # Встановлюємо правильні права доступу
-              chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml
-              chmod 644 /home/ubuntu/docker-compose.yml
-
-              # Запускаємо сервіси (використовуємо docker compose plugin)
-              cd /home/ubuntu
-              docker compose -f docker-compose.yml up -d
+              sleep 15
+              
+              # Pull the image first
+              docker pull mateichukmykola/coordinator:latest
+              
+              # Run coordinator with properly quoted environment variable
+              docker run -d -p 8000:8000 \
+                -e SHARD_URLS="http://${aws_instance.shard1.private_ip}:8000,http://${aws_instance.shard2.private_ip}:8000" \
+                --name coordinator_app \
+                mateichukmykola/coordinator:latest
               EOF
-
+  )
   tags = { Name = "coordinator" }
 }
 
-# Shard 1 (Залежить від Coordinator)
+# Shards
 resource "aws_instance" "shard1" {
-  ami           = "ami-00174bba02cf96021"
+  ami           = "ami-0ecb62995f68bb549"
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
-
-  user_data = <<-EOF
+  key_name               = aws_key_pair.deploy.key_name
+  user_data = base64encode(<<-EOF
               #!/bin/bash
-              set -e
+              export DEBIAN_FRONTEND=noninteractive
               apt-get update
               apt-get install -y docker.io
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
-
-              # Чекаємо поки Docker повністю запуститься
-              while ! docker info > /dev/null 2>&1; do
-                echo "Waiting for Docker to start..."
-                sleep 2
-              done
-
-              # Запускаємо Shard 1 з необхідними змінними середовища
-              # COORDINATOR_URL видалено, оскільки шарди не використовують його
-              docker run -d \
-                --name shard1 \
-                --restart unless-stopped \
-                -p 8000:8000 \
-                -e SHARD_ID="shard1" \
-                -e DYNAMODB_TABLE="ShardData-1" \
-                mateichukmykola/shard:latest
+              sleep 15
+              
+              # Pull image first
+              docker pull mateichukmykola/shard:latest
+              
+              docker run -d -p 8000:8000 --name shard1_app mateichukmykola/shard:latest
               EOF
+  )
   tags = { Name = "shard1" }
 }
 
-# Shard 2 (Залежить від Coordinator)
 resource "aws_instance" "shard2" {
-  ami           = "ami-00174bba02cf96021"
+  ami           = "ami-0ecb62995f68bb549"
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
-
-  user_data = <<-EOF
+  key_name               = aws_key_pair.deploy.key_name
+  user_data = base64encode(<<-EOF
               #!/bin/bash
-              set -e
+              export DEBIAN_FRONTEND=noninteractive
               apt-get update
               apt-get install -y docker.io
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
-
-              # Чекаємо поки Docker повністю запуститься
-              while ! docker info > /dev/null 2>&1; do
-                echo "Waiting for Docker to start..."
-                sleep 2
-              done
-
-              # Запускаємо Shard 2 з необхідними змінними середовища
-              # COORDINATOR_URL видалено, оскільки шарди не використовують його
-              docker run -d \
-                --name shard2 \
-                --restart unless-stopped \
-                -p 8000:8000 \
-                -e SHARD_ID="shard2" \
-                -e DYNAMODB_TABLE="ShardData-2" \
-                mateichukmykola/shard:latest
+              sleep 15
+              
+              # Pull image first
+              docker pull mateichukmykola/shard:latest
+              
+              docker run -d -p 8000:8000 --name shard2_app mateichukmykola/shard:latest
               EOF
+  )
   tags = { Name = "shard2" }
 }
 
 output "coordinator_public_ip" {
-  description = "Public IP address of the Coordinator instance."
   value = aws_instance.coordinator.public_ip
 }
 
-output "coordinator_private_ip" {
-  description = "Private IP address of the Coordinator instance."
-  value = aws_instance.coordinator.private_ip
-}
-
-output "shard1_private_ip" {
-  description = "Private IP address of Shard 1 instance."
-  value = aws_instance.shard1.private_ip
-}
-
-output "shard2_private_ip" {
-  description = "Private IP address of Shard 2 instance."
-  value = aws_instance.shard2.private_ip
-}
-
-output "coordinator_url" {
-  description = "URL to access the Coordinator service."
-  value = "http://${aws_instance.coordinator.public_ip}:8000"
+output "ssh_private_key" {
+  value     = tls_private_key.deploy.private_key_pem
+  sensitive = true
 }

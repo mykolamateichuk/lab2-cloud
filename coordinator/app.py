@@ -4,6 +4,8 @@ from typing import Dict, Any, List
 import requests
 import os
 from shard_manager import ShardManager
+from typing import Dict, Any
+
 
 app = FastAPI()
 
@@ -29,7 +31,7 @@ def register_table(schema: TableSchema):
 class RecordCreate(BaseModel):
     partition_key: str
     sort_key: str
-    data: dict
+    data: Dict[str, Any]
 
 @app.post("/tables/{table_name}/records")
 def create_record(table_name: str, record: RecordCreate):
@@ -74,3 +76,7 @@ def delete_record(
     shard_url = shard_manager.get_shard_url(partition_key)
     resp = requests.delete(f"{shard_url}/records/{key}")
     return {"status": "deleted"}
+
+@app.get("/health")
+def health():
+    return {"status": "healthy", "version": "1.0.0"}

@@ -1,9 +1,8 @@
 version: '3'
 services:
   coordinator:
-    image: mateichukmykola/coordinator:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - DYNAMODB_TABLE_NAME=CoordinatorMetadata
-      - SHARD_URLS=${shard_urls}
+    image: sofmd/coordinator:latest
+  ports:
+    - "8000:8000"
+  environment:
+    - SHARD_URLS=http://${shard1_host}:8000,http://${shard2_host}:8000

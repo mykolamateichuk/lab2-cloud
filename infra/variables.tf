@@ -3,5 +3,5 @@ variable "region" {
 }
 
 variable "instance_type" {
-  default = "t4g.micro"
+  default = "t3.micro"
 }
