@@ -2,7 +2,7 @@ terraform {
   required_version = ">= 1.0"
   backend "s3" {
     bucket         = "horse-zombie-warden-pixel-state-bucker-23984"
-    key            = "sharded-kv/terraform.tfstate"
+    key            = "lab2_hts/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
     dynamodb_table = "terraform-locks"  # For state locking
