@@ -9,7 +9,7 @@ resource "aws_vpc" "main" {
 resource "aws_subnet" "main" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = true # Дозволяє публічний IP для доступу
 }
 
 resource "aws_internet_gateway" "gw" {
@@ -37,7 +37,7 @@ resource "aws_security_group" "allow_all" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = ["0.0.0.0/0"] # Вхідний трафік (включно з портом 8000)
   }
   egress {
     from_port   = 0
@@ -47,14 +47,14 @@ resource "aws_security_group" "allow_all" {
   }
 }
 
-# Coordinator
+# Coordinator (Залежність розірвана: більше не залежить від IP шардів)
 resource "aws_instance" "coordinator" {
   ami           = "ami-00174bba02cf96021"  # Ubuntu 22.04 LTS
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
 
-  # Оновлений user_data для встановлення Docker Compose та запуску Coordinator
+  # Оновлений user_data: прибрані shard1_host та shard2_host з аргументів templatefile
   user_data = <<-EOF
               #!/bin/bash
               apt-get update
@@ -65,9 +65,8 @@ resource "aws_instance" "coordinator" {
               # Записуємо згенерований docker-compose.yml.j2 на інстанс
               cat > /home/ubuntu/docker-compose.yml << EOL
               ${templatefile("${path.module}/docker-compose.yml.j2", {
-                coordinator_port = 8000,
-                shard1_host = aws_instance.shard1.private_ip,
-                shard2_host = aws_instance.shard2.private_ip
+                coordinator_port = 8000
+                # IP-адреси шардів тут видалено для уникнення кругової залежності
               })}
               EOL
 
@@ -78,14 +77,14 @@ resource "aws_instance" "coordinator" {
   tags = { Name = "coordinator" }
 }
 
-# Shard 1
+# Shard 1 (Залежить від Coordinator)
 resource "aws_instance" "shard1" {
   ami           = "ami-00174bba02cf96021"
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
 
-  # Оновлений user_data: встановлення Docker та запуск Shard 1 з env vars
+  # user_data залишається, оскільки залежність від coordinator.private_ip тепер одностороння
   user_data = <<-EOF
               #!/bin/bash
               apt-get update
@@ -103,14 +102,14 @@ resource "aws_instance" "shard1" {
   tags = { Name = "shard1" }
 }
 
-# Shard 2
+# Shard 2 (Залежить від Coordinator)
 resource "aws_instance" "shard2" {
   ami           = "ami-00174bba02cf96021"
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
 
-  # Оновлений user_data: встановлення Docker та запуск Shard 2 з env vars
+  # user_data залишається, оскільки залежність від coordinator.private_ip тепер одностороння
   user_data = <<-EOF
               #!/bin/bash
               apt-get update
