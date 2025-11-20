@@ -3,6 +3,7 @@ services:
   coordinator:
     image: mateichukmykola/coordinator:latest
     ports:
-      - "${coordinator_port}:8000"
+      - "8000:8000"
     environment:
       - DYNAMODB_TABLE_NAME=CoordinatorMetadata
+      - SHARD_URLS=${shard_urls}
