@@ -47,15 +47,13 @@ resource "aws_security_group" "allow_all" {
   }
 }
 
-# Coordinator (Залежить від шардів для отримання їх IP-адрес)
+# Coordinator - will get shard IPs via template interpolation
+# Terraform will automatically create shards first since coordinator references them
 resource "aws_instance" "coordinator" {
   ami           = "ami-00174bba02cf96021"  # Ubuntu 22.04 LTS
   instance_type = var.instance_type
   subnet_id     = aws_subnet.main.id
   vpc_security_group_ids = [aws_security_group.allow_all.id]
-
-  # Залежність від шардів для отримання їх IP-адрес
-  depends_on = [aws_instance.shard1, aws_instance.shard2]
 
   user_data = <<-EOF
               #!/bin/bash
@@ -115,13 +113,13 @@ resource "aws_instance" "shard1" {
               done
 
               # Запускаємо Shard 1 з необхідними змінними середовища
+              # COORDINATOR_URL видалено, оскільки шарди не використовують його
               docker run -d \
                 --name shard1 \
                 --restart unless-stopped \
                 -p 8000:8000 \
                 -e SHARD_ID="shard1" \
                 -e DYNAMODB_TABLE="ShardData-1" \
-                -e COORDINATOR_URL="http://${aws_instance.coordinator.private_ip}:8000" \
                 mateichukmykola/shard:latest
               EOF
   tags = { Name = "shard1" }
@@ -150,13 +148,13 @@ resource "aws_instance" "shard2" {
               done
 
               # Запускаємо Shard 2 з необхідними змінними середовища
+              # COORDINATOR_URL видалено, оскільки шарди не використовують його
               docker run -d \
                 --name shard2 \
                 --restart unless-stopped \
                 -p 8000:8000 \
                 -e SHARD_ID="shard2" \
                 -e DYNAMODB_TABLE="ShardData-2" \
-                -e COORDINATOR_URL="http://${aws_instance.coordinator.private_ip}:8000" \
                 mateichukmykola/shard:latest
               EOF
   tags = { Name = "shard2" }
